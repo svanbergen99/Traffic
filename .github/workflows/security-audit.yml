@@ -7,8 +7,11 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_COLOR: "0"
+
 jobs:
-  security-audit:
+  security:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -16,6 +19,8 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
-
-      - name: Run repository security audit
+      - name: Require Node 22
+        run: |
+          node -e 'const major=Number(process.versions.node.split(".")[0]); if (major !== 22) { console.error(`Node 22 required, got ${process.versions.node}`); process.exit(1) }'
+      - name: Security audit
         run: node tools/security-audit.mjs
