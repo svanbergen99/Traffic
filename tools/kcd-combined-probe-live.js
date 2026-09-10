@@ -1,50 +1,516 @@
 (() => {
   'use strict';
-  const G='__kcdCombinedProbe', UI='__kcdCombinedProbeUI', VER='1.1.0';
-  const SENS=/(authorization|cookie|token|secret|password|api.?key|session|credential|bearer|csrf|xsrf|sid)/i;
-  const DANGER=/(save|opslaan|delete|verwijder|remove|submit|send|logout|uitloggen|confirm|approve|reject|request|publish|create|add|update|edit|wijzig|password|reset|upload|download|import|export)/i;
-  const BLOCKURL=/(\/login|\/logout|\/signout|\/security\/|telemetry|user_profile|\/session)/i;
-  try{window[G]?.stop?.()}catch{}
 
-  const orig={fetch:window.fetch,xOpen:XMLHttpRequest.prototype.open,xSend:XMLHttpRequest.prototype.send};
-  const s={version:VER,startedAt:new Date().toISOString(),active:true,clicking:false,stopClick:false,
-    files:[],network:[],tables:[],panels:[],clickTests:[],clickHits:[],blocked:[],errors:[],
-    mutations:{childList:0,attributes:0},policy:{headers:false,cookies:false,storage:false,typedValues:false,secretsRedacted:true}};
-  let obs,timer,box,lastActivity=Date.now();
-  const now=()=>new Date().toISOString();
-  const clean=(v,n=500)=>String(v??'').replace(/\s+/g,' ').trim().slice(0,n);
-  const hash=v=>{let x;try{x=typeof v==='string'?v:JSON.stringify(v)}catch{x=String(v)}let h=2166136261;for(let i=0;i<x.length;i++){h^=x.charCodeAt(i);h=Math.imul(h,16777619)}return(h>>>0).toString(16)};
-  function safeUrl(v){try{const u=new URL(String(v||''),location.href);for(const k of [...u.searchParams.keys()])if(SENS.test(k))u.searchParams.set(k,'[REDACTED]');return u.href}catch{return clean(v,2000)}}
-  function scrub(v){let x=String(v??'');x=x.replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi,'Bearer [REDACTED]');return x.replace(/((?:authorization|auth|token|session|sid|csrf|api[-_]?key|secret|password|credential)\s*["']?\s*[:=]\s*["']?)([^&\s,"'<>}]+)/gi,'$1[REDACTED]').slice(0,2000000)}
-  function safeBody(v){if(v==null)return null;if(typeof v==='string'){try{const o=JSON.parse(v);return redact(o)}catch{return scrub(v)}}if(v instanceof URLSearchParams){const o={};for(const[k,x]of v)o[k]=SENS.test(k)?'[REDACTED]':scrub(x);return o}if(typeof FormData!=='undefined'&&v instanceof FormData){const o={};for(const[k,x]of v)o[k]=SENS.test(k)?'[REDACTED]':typeof x==='string'?scrub(x):'[FILE]';return o}return String(v)}
-  function redact(v,d=0){if(d>10)return'[MAX_DEPTH]';if(v==null||typeof v==='number'||typeof v==='boolean')return v;if(typeof v==='string')return scrub(v);if(Array.isArray(v))return v.slice(0,1500).map(x=>redact(x,d+1));if(typeof v==='object'){const o={};for(const[k,x]of Object.entries(v).slice(0,2500))o[k]=SENS.test(k)?'[REDACTED]':redact(x,d+1);return o}return String(v)}
-  const isUI=n=>Boolean((n?.nodeType===1?n:n?.parentElement)?.closest?.('#'+UI));
-  const visible=e=>{if(!e||!e.isConnected||e.disabled)return false;const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&r.bottom>0&&r.right>0&&r.top<innerHeight&&r.left<innerWidth};
-  function desc(e){if(!e)return null;const r=e.getBoundingClientRect();return{tag:(e.tagName||'').toLowerCase(),id:clean(e.id,150)||null,className:clean(typeof e.className==='string'?e.className:'',250)||null,role:clean(e.getAttribute?.('role'),100)||null,aria:clean(e.getAttribute?.('aria-label'),250)||null,title:clean(e.getAttribute?.('title'),250)||null,text:clean(e.innerText||e.textContent,350)||null,href:e.getAttribute?.('href')?safeUrl(e.getAttribute('href')):null,rect:{left:Math.round(r.left),top:Math.round(r.top),width:Math.round(r.width),height:Math.round(r.height)}}}
-  function key(e){const d=desc(e);return d?.id?'id:'+d.id:d?.aria?'aria:'+d.aria:d?.title?'title:'+d.title:hash({t:d?.tag,c:d?.className,r:d?.role,x:d?.text})}
-  function clickable(raw){let e=raw?.nodeType===1?raw:raw?.parentElement;for(let i=0;e&&i<7;i++,e=e.parentElement){if(!visible(e)||isUI(e))continue;const t=(e.tagName||'').toLowerCase(),r=(e.getAttribute?.('role')||'').toLowerCase();if(['button','a','summary'].includes(t)||['button','tab','menuitem','option','gridcell','columnheader','rowheader','treeitem'].includes(r)||typeof e.onclick==='function')return e;try{if(getComputedStyle(e).cursor==='pointer')return e}catch{}}return null}
-  function guard(e){if(!visible(e))return{safe:false,reason:'not-visible'};if(isUI(e))return{safe:false,reason:'probe-ui'};if(e.matches?.('input,textarea,select,option,form,[contenteditable=true]'))return{safe:false,reason:'input'};if(e.matches?.('button[type=submit],input[type=submit]'))return{safe:false,reason:'submit'};const d=desc(e),w=clean([d?.id,d?.className,d?.role,d?.aria,d?.title,d?.text,d?.href].filter(Boolean).join(' '),1400);if(DANGER.test(w))return{safe:false,reason:'dangerous-action'};if(d?.href){try{const u=new URL(d.href,location.href);if(u.origin!==location.origin)return{safe:false,reason:'external-link'};if(u.pathname!==location.pathname||u.search!==location.search)return{safe:false,reason:'navigation-link'}}catch{return{safe:false,reason:'bad-link'}}}const r=e.getBoundingClientRect();if(r.top<75&&r.right>innerWidth*.8)return{safe:false,reason:'top-right-protected'};return{safe:true,reason:'safe-observation-click'}}
-  function targets(){const q='button,a,summary,[role=button],[role=tab],[role=menuitem],[role=option],[role=gridcell],[role=columnheader],[role=rowheader],[role=treeitem],[aria-label],[title]';const m=new Map();for(const r of document.querySelectorAll(q)){const e=clickable(r)||r;if(!visible(e)||isUI(e))continue;const k=key(e);if(!m.has(k))m.set(k,e)}return[...m.values()]}
+  const G = '__kcdCombinedProbe';
+  const UI = '__kcdCombinedProbeUI';
+  const VER = '1.2.0';
+  const MAX_NETWORK = 500;
+  const MAX_FILES = 1500;
+  const MAX_BODY = 2 * 1024 * 1024;
+  const SENSITIVE = /(authorization|cookie|token|secret|password|passwd|api.?key|session|credential|bearer|csrf|xsrf|saml|oidc|sid)/i;
+  const BLOCKED_URL = /(\/login|\/logout|\/signout|\/internal\/security\/|\/api\/security\/|telemetry|user_profile|\/internal\/session)/i;
+  const DATA_ENDPOINT = /(\/internal\/bsearch(?:\?|$)|\/internal\/metrics\/vis\/data(?:\?|$)|\/api\/.*(?:traffic|rooster|schedule|queue|collector))/i;
 
-  function files(){const m=new Map(),add=(url,type,source)=>{if(!url)return;const u=safeUrl(url);if(BLOCKURL.test(u))return;const k=type+'|'+u;if(m.has(k))return;let name=u;try{name=decodeURIComponent(new URL(u,location.href).pathname.split('/').filter(Boolean).pop()||new URL(u).hostname)}catch{}m.set(k,{name,type,source,url:u})};for(const x of document.scripts)add(x.src,'script','dom');for(const x of document.querySelectorAll('link[href]'))add(x.href,clean(x.rel,50)||'link','dom');for(const x of document.querySelectorAll('img[src]'))add(x.src,'image','dom');try{for(const x of performance.getEntriesByType('resource'))add(x.name,clean(x.initiatorType,50)||'resource','performance')}catch{}s.files=[...m.values()].slice(0,1500)}
-  function tables(){s.tables=[...document.querySelectorAll('table')].slice(0,100).map(t=>{const h=[...t.querySelectorAll('thead th')].map(x=>clean(x.innerText||x.textContent,250));const rows=[...t.querySelectorAll('tbody tr')].slice(0,500).map(r=>[...r.querySelectorAll('th,td')].map(x=>clean(x.innerText||x.textContent,500))).filter(x=>x.length);return{headers:h,rows,fingerprint:hash({h,rows})}})}
-  function panels(){const out=[],seen=new Set();for(const e of [...document.querySelectorAll('.embPanel,[data-test-subj*=embeddablePanel],section,article')]){if(!visible(e)||isUI(e))continue;const title=clean(e.querySelector?.('[data-test-subj=embeddablePanelTitleInner]')?.innerText||e.querySelector?.('h1,h2,h3,h4,header')?.innerText||e.getAttribute?.('aria-label')||e.id,220),text=clean(e.innerText,12000);if(!title&&text.length<20)continue;const f=hash({title,text:text.slice(0,1000)});if(seen.has(f))continue;seen.add(f);out.push({title:title||'(zonder titel)',text,fingerprint:hash(text)});if(out.length>=100)break}s.panels=out}
-  function refresh(){files();tables();panels();render()}
-  function snap(){return{href:safeUrl(location.href),title:document.title,files:hash(s.files.map(x=>[x.type,x.url])),tables:hash(s.tables),panels:hash(s.panels),targets:hash(targets().map(key)),network:s.network.length}}
-  function dif(a,b){const o={};for(const k of Object.keys(a))if(JSON.stringify(a[k])!==JSON.stringify(b[k]))o[k]={before:a[k],after:b[k]};return o}
-  async function settle(){const st=Date.now();while(Date.now()-st<5000){await new Promise(r=>setTimeout(r,120));if(Date.now()-lastActivity>=1200)return}}
+  try { window[G]?.stop?.(); } catch {}
 
-  function hookNetwork(){const meta=new WeakMap();XMLHttpRequest.prototype.open=function(method,url,...rest){meta.set(this,{kind:'xhr',method:String(method||'GET').toUpperCase(),url:safeUrl(url),startedAt:now()});return orig.xOpen.call(this,method,url,...rest)};XMLHttpRequest.prototype.send=function(body){const m=meta.get(this)||{kind:'xhr',method:'UNKNOWN',url:'',startedAt:now()};m.requestBody=safeBody(body);this.addEventListener('loadend',()=>{try{if(s.network.length>=500)return;m.status=Number(this.status||0);m.responseUrl=safeUrl(this.responseURL||m.url);if(new URL(m.responseUrl,location.href).origin===location.origin&&!BLOCKURL.test(m.responseUrl)){try{if(!this.responseType||this.responseType==='text')m.responseBody=scrub(this.responseText||'');else if(this.responseType==='json')m.responseBody=redact(this.response)}catch{}}s.network.push(m);lastActivity=Date.now();refresh()}catch(e){s.errors.push(String(e?.message||e))}},{once:true});return orig.xSend.call(this,body)};if(orig.fetch)window.fetch=function(input,init={}){const req=typeof Request!=='undefined'&&input instanceof Request?input:null,m={kind:'fetch',method:String(init.method||req?.method||'GET').toUpperCase(),url:safeUrl(req?.url||input||''),requestBody:safeBody(init.body),startedAt:now()};const p=orig.fetch.call(this,input,init);p.then(async r=>{if(s.network.length>=500)return;m.status=r.status;m.responseUrl=safeUrl(r.url||m.url);if(new URL(m.responseUrl,location.href).origin===location.origin&&!BLOCKURL.test(m.responseUrl)){try{m.responseBody=scrub(await r.clone().text())}catch{}}s.network.push(m);lastActivity=Date.now();refresh()}).catch(e=>{m.error=String(e?.message||e);s.network.push(m);render()});return p}}
+  const originals = {
+    fetch: window.fetch,
+    xhrOpen: XMLHttpRequest.prototype.open,
+    xhrSend: XMLHttpRequest.prototype.send
+  };
 
-  async function clickScan(){if(!s.active||s.clicking)return;s.clicking=true;s.stopClick=false;render();const tested=new Set();let cleanRounds=0,round=0;try{while(s.active&&!s.stopClick&&s.clickTests.length<500){round++;refresh();let any=false,hit=false;for(const e of targets()){if(!s.active||s.stopClick)break;const k=key(e);if(tested.has(k))continue;tested.add(k);any=true;const g=guard(e),target=desc(e);if(!g.safe){s.blocked.push({at:now(),round,key:k,target,guard:g});continue}const before=snap(),n0=s.network.length,t={at:now(),round,key:k,target,guard:g,status:'pending'};try{e.click();t.status='clicked'}catch(err){t.status='click-error';t.error=String(err?.message||err);s.clickTests.push(t);continue}lastActivity=Date.now();await settle();refresh();const after=snap();t.before=before;t.after=after;t.changes=dif(before,after);t.networkRange=[n0,s.network.length];t.hit=Object.keys(t.changes).some(x=>x!=='network')||s.network.length>n0;s.clickTests.push(t);if(t.hit){s.clickHits.push(t);hit=true;break}render()}if(hit){cleanRounds=0;continue}cleanRounds=any?0:cleanRounds+1;if(cleanRounds>=2)break;await new Promise(r=>setTimeout(r,1400))}}catch(e){s.errors.push(String(e?.stack||e))}finally{s.clicking=false;render()}}
+  const state = {
+    name: 'KCD Passive Data Probe',
+    version: VER,
+    startedAt: new Date().toISOString(),
+    stoppedAt: null,
+    active: true,
+    mode: 'passive-only',
+    files: [],
+    tables: [],
+    panels: [],
+    network: [],
+    decodedData: [],
+    mutations: { childList: 0, attributes: 0 },
+    errors: [],
+    policy: {
+      passiveOnly: true,
+      automaticClicks: false,
+      requestHeadersCaptured: false,
+      responseHeadersCaptured: false,
+      cookiesCaptured: false,
+      browserStorageCaptured: false,
+      typedInputValuesCaptured: false,
+      authLikeValuesRedacted: true
+    }
+  };
 
-  function download(){refresh();const name=`KCD-Combined-Probe-v${VER}-${new Date().toISOString().replace(/[:.]/g,'-')}.json`,blob=new Blob([JSON.stringify(s,null,2)+'\n'],{type:'application/json'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);return name}
-  function stop(){if(!s.active)return{ok:true,alreadyStopped:true};s.active=false;s.stopClick=true;s.stoppedAt=now();try{obs?.disconnect()}catch{}try{clearInterval(timer)}catch{}try{XMLHttpRequest.prototype.open=orig.xOpen;XMLHttpRequest.prototype.send=orig.xSend;if(orig.fetch)window.fetch=orig.fetch}catch{}render();return{ok:true,dataReady:true,stoppedAt:s.stoppedAt}}
-  const esc=x=>String(x??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-  function render(){if(!box?.isConnected)return;box.querySelector('.st').innerHTML=`Status: <b>${s.active?(s.clicking?'KLIKSCAN ACTIEF':'PASSIEF ACTIEF'):'GESTOPT'}</b><br>Bestanden: ${s.files.length} · Netwerk: ${s.network.length} · Tabellen: ${s.tables.length} · Panelen: ${s.panels.length}<br>Kliktests: ${s.clickTests.length} · Hits: ${s.clickHits.length} · Geblokkeerd: ${s.blocked.length} · Fouten: ${s.errors.length}`;box.querySelector('.fl').innerHTML=s.files.slice(-150).reverse().map(f=>`<div style="padding:3px 0;border-bottom:1px solid #222"><span style="opacity:.6">[${esc(f.type)}]</span> <span title="${esc(f.url)}">${esc(f.name)}</span></div>`).join('')||'<span style="opacity:.6">Nog geen resources gevonden</span>';const b=box.querySelector('.start');b.disabled=!s.active||s.clicking;b.textContent=s.clicking?'KLIKSCAN DRAAIT…':'START KLIKSCAN';box.querySelector('.stop').disabled=!s.active}
-  function makeUI(){document.getElementById(UI)?.remove();box=document.createElement('div');box.id=UI;Object.assign(box.style,{position:'fixed',top:'12px',right:'12px',width:'430px',maxHeight:'82vh',overflow:'hidden',zIndex:2147483647,background:'rgba(14,14,17,.97)',color:'#fff',border:'1px solid #555',borderRadius:'10px',boxShadow:'0 8px 24px #0008',font:'12px/1.4 Consolas,monospace'});box.innerHTML=`<div class="head" style="padding:10px 12px;border-bottom:1px solid #444;cursor:move;font-weight:700">KCD Combined Probe v${VER}</div><div style="padding:10px 12px"><div class="st" style="margin-bottom:8px"></div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"><button class="start">START KLIKSCAN</button><button class="ref">VERVERS</button><button class="down">DOWNLOAD JSON</button><button class="stop">STOP</button></div><b>Gevonden bestanden/resources</b><div class="fl" style="margin-top:5px;max-height:47vh;overflow:auto;border:1px solid #333;border-radius:6px;padding:6px;background:#09090b"></div></div>`;document.documentElement.appendChild(box);for(const b of box.querySelectorAll('button'))Object.assign(b.style,{padding:'6px 8px',border:'1px solid #666',borderRadius:'5px',background:'#222',color:'#fff',cursor:'pointer',font:'inherit'});box.querySelector('.start').onclick=()=>void clickScan();box.querySelector('.ref').onclick=refresh;box.querySelector('.down').onclick=download;box.querySelector('.stop').onclick=stop;const h=box.querySelector('.head');let d=null;h.onpointerdown=e=>{const r=box.getBoundingClientRect();d={x:e.clientX-r.left,y:e.clientY-r.top};h.setPointerCapture?.(e.pointerId)};h.onpointermove=e=>{if(!d)return;box.style.left=Math.max(0,Math.min(innerWidth-box.offsetWidth,e.clientX-d.x))+'px';box.style.top=Math.max(0,Math.min(innerHeight-40,e.clientY-d.y))+'px';box.style.right='auto'};h.onpointerup=()=>d=null;render()}
+  let observer = null;
+  let timer = null;
+  let box = null;
 
-  hookNetwork();obs=new MutationObserver(ms=>{let ch=false;for(const m of ms){if(isUI(m.target))continue;if(m.type==='childList')s.mutations.childList++;else if(m.type==='attributes')s.mutations.attributes++;ch=true}if(ch){lastActivity=Date.now();files();render()}});obs.observe(document.documentElement,{subtree:true,childList:true,attributes:true});makeUI();refresh();timer=setInterval(()=>s.active&&refresh(),3000);
-  window[G]=Object.freeze({version:VER,status:()=>({active:s.active,clicking:s.clicking,files:s.files.length,network:s.network.length,tables:s.tables.length,panels:s.panels.length,clickTests:s.clickTests.length,clickHits:s.clickHits.length,blocked:s.blocked.length,errors:s.errors.length}),data:()=>s,refresh,startClickScan:clickScan,download,stop,show:makeUI,hide:()=>document.getElementById(UI)?.remove()});
-  console.log(`[KCD Combined Probe v${VER}] actief`);
+  const now = () => new Date().toISOString();
+  const clean = (v, n = 500) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+
+  function hash(value) {
+    let text;
+    try { text = typeof value === 'string' ? value : JSON.stringify(value); }
+    catch { text = String(value); }
+    let h = 2166136261;
+    for (let i = 0; i < text.length; i += 1) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(16).padStart(8, '0');
+  }
+
+  function cut(value, max = MAX_BODY) {
+    const text = String(value ?? '');
+    return text.length > max ? `${text.slice(0, max)}\n...[AFGEKAPT]` : text;
+  }
+
+  function sanitizeUrl(raw) {
+    try {
+      const url = new URL(String(raw || ''), location.href);
+      for (const key of [...url.searchParams.keys()]) {
+        if (SENSITIVE.test(key)) url.searchParams.set(key, '[REDACTED]');
+      }
+      return url.href;
+    } catch {
+      return clean(raw, 2000);
+    }
+  }
+
+  function sanitizeText(value) {
+    let text = cut(value);
+    text = text.replace(/Bearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]');
+    text = text.replace(
+      /((?:authorization|auth|token|session(?:id)?|sid|csrf|api[-_]?key|secret|password|credential)\s*["']?\s*[:=]\s*["']?)([^&\s,"'<>}]+)/gi,
+      '$1[REDACTED]'
+    );
+    return text;
+  }
+
+  function redact(value, depth = 0) {
+    if (depth > 10) return '[MAX_DEPTH]';
+    if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
+    if (typeof value === 'string') return sanitizeText(value);
+    if (Array.isArray(value)) return value.slice(0, 1500).map((item) => redact(item, depth + 1));
+    if (typeof value === 'object') {
+      const out = {};
+      for (const [key, item] of Object.entries(value).slice(0, 2500)) {
+        out[key] = SENSITIVE.test(key) ? '[REDACTED]' : redact(item, depth + 1);
+      }
+      return out;
+    }
+    return String(value);
+  }
+
+  function safeBody(body) {
+    if (body == null) return null;
+    if (typeof body === 'string') {
+      try { return redact(JSON.parse(body)); }
+      catch { return sanitizeText(body); }
+    }
+    if (body instanceof URLSearchParams) {
+      const out = {};
+      for (const [key, value] of body.entries()) {
+        out[key] = SENSITIVE.test(key) ? '[REDACTED]' : sanitizeText(value);
+      }
+      return out;
+    }
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      const out = {};
+      for (const [key, value] of body.entries()) {
+        out[key] = SENSITIVE.test(key)
+          ? '[REDACTED]'
+          : typeof value === 'string' ? sanitizeText(value) : '[FILE]';
+      }
+      return out;
+    }
+    if (body instanceof ArrayBuffer) return `[ArrayBuffer ${body.byteLength}]`;
+    try { return redact(body); } catch { return sanitizeText(String(body)); }
+  }
+
+  function sameOrigin(raw) {
+    try { return new URL(String(raw || ''), location.href).origin === location.origin; }
+    catch { return false; }
+  }
+
+  function isUiNode(node) {
+    const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+    return Boolean(el?.closest?.(`#${UI}`));
+  }
+
+  function visible(el) {
+    if (!el || !el.isConnected) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+  }
+
+  function collectFiles() {
+    const map = new Map();
+    const add = (url, type, source) => {
+      if (!url) return;
+      const safe = sanitizeUrl(url);
+      if (BLOCKED_URL.test(safe)) return;
+      const key = `${type}|${safe}`;
+      if (map.has(key)) return;
+      let name = safe;
+      try {
+        const parsed = new URL(safe, location.href);
+        name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || parsed.hostname);
+      } catch {}
+      map.set(key, { name, type, source, url: safe });
+    };
+
+    for (const item of document.scripts) add(item.src, 'script', 'dom');
+    for (const item of document.querySelectorAll('link[href]')) add(item.href, clean(item.rel, 60) || 'link', 'dom');
+    for (const item of document.querySelectorAll('img[src]')) add(item.src, 'image', 'dom');
+    for (const item of document.querySelectorAll('a[href$=".json"],a[href$=".js"],a[href$=".css"],a[href$=".map"],a[href$=".wasm"],a[href$=".csv"],a[href$=".yaml"],a[href$=".yml"]')) {
+      add(item.href, 'linked-file', 'dom');
+    }
+
+    try {
+      for (const entry of performance.getEntriesByType('resource')) {
+        add(entry.name, clean(entry.initiatorType, 60) || 'resource', 'performance');
+      }
+    } catch {}
+
+    state.files = [...map.values()].slice(0, MAX_FILES);
+  }
+
+  function collectTables() {
+    state.tables = [...document.querySelectorAll('table')].slice(0, 100).map((table) => {
+      const headers = [...table.querySelectorAll('thead th')].map((cell) => clean(cell.innerText || cell.textContent, 250));
+      const rows = [...table.querySelectorAll('tbody tr')].slice(0, 500).map((row) =>
+        [...row.querySelectorAll('th,td')].map((cell) => clean(cell.innerText || cell.textContent, 500))
+      ).filter((row) => row.length);
+      return { headers, rows, fingerprint: hash({ headers, rows }) };
+    });
+  }
+
+  function collectPanels() {
+    const out = [];
+    const seen = new Set();
+    const candidates = document.querySelectorAll('.embPanel,[data-test-subj*=embeddablePanel],section,article');
+
+    for (const el of candidates) {
+      if (!visible(el) || isUiNode(el)) continue;
+      const title = clean(
+        el.querySelector?.('[data-test-subj=embeddablePanelTitleInner]')?.innerText ||
+        el.querySelector?.('h1,h2,h3,h4,header')?.innerText ||
+        el.getAttribute?.('aria-label') || el.id,
+        220
+      );
+      const text = clean(el.innerText, 12000);
+      if (!title && text.length < 20) continue;
+      const key = hash({ title, text: text.slice(0, 1000) });
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ title: title || '(zonder titel)', text, fingerprint: hash(text) });
+      if (out.length >= 100) break;
+    }
+
+    state.panels = out;
+  }
+
+  async function decodeBsearch(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return [];
+    const out = [];
+    const chunks = raw.split(/\s+/).filter(Boolean).slice(0, 200);
+
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index];
+      try {
+        if (chunk.startsWith('{') || chunk.startsWith('[')) {
+          out.push({ index, decoder: 'raw-json', value: redact(JSON.parse(chunk)) });
+          continue;
+        }
+        if (typeof DecompressionStream === 'undefined') continue;
+        const normalized = chunk.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized.padEnd(normalized.length + ((4 - normalized.length % 4) % 4), '=');
+        const binary = atob(padded);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
+        const decodedText = await new Response(stream).text();
+        out.push({ index, decoder: 'deflate-base64', value: redact(JSON.parse(decodedText)) });
+      } catch (error) {
+        state.errors.push({ at: now(), area: 'bsearch-decode', index, error: String(error?.message || error) });
+      }
+    }
+
+    return out;
+  }
+
+  async function captureFetchBody(url, response) {
+    if (!sameOrigin(url) || BLOCKED_URL.test(url) || !DATA_ENDPOINT.test(url)) return null;
+    try {
+      const text = sanitizeText(await response.clone().text());
+      if (/\/internal\/bsearch/i.test(url)) {
+        const decoded = await decodeBsearch(text);
+        if (decoded.length) state.decodedData.push({ at: now(), url, decoded });
+      }
+      return text;
+    } catch (error) {
+      return `[response unavailable: ${String(error?.message || error)}]`;
+    }
+  }
+
+  function installNetworkHooks() {
+    const xhrMeta = new WeakMap();
+
+    XMLHttpRequest.prototype.open = function passiveProbeOpen(method, url, ...rest) {
+      xhrMeta.set(this, {
+        kind: 'xhr',
+        method: String(method || 'GET').toUpperCase(),
+        url: sanitizeUrl(url),
+        startedAt: now()
+      });
+      return originals.xhrOpen.call(this, method, url, ...rest);
+    };
+
+    XMLHttpRequest.prototype.send = function passiveProbeSend(body) {
+      const meta = xhrMeta.get(this) || { kind: 'xhr', method: 'UNKNOWN', url: '', startedAt: now() };
+      meta.requestBody = safeBody(body);
+      this.addEventListener('loadend', () => {
+        try {
+          if (state.network.length >= MAX_NETWORK) return;
+          meta.completedAt = now();
+          meta.status = Number(this.status || 0);
+          meta.responseUrl = sanitizeUrl(this.responseURL || meta.url);
+          if (sameOrigin(meta.responseUrl) && DATA_ENDPOINT.test(meta.responseUrl) && !BLOCKED_URL.test(meta.responseUrl)) {
+            try {
+              if (!this.responseType || this.responseType === 'text') meta.responseBody = sanitizeText(this.responseText || '');
+              else if (this.responseType === 'json') meta.responseBody = redact(this.response);
+            } catch {}
+          }
+          state.network.push(meta);
+          refresh();
+        } catch (error) {
+          state.errors.push({ at: now(), area: 'xhr', error: String(error?.message || error) });
+        }
+      }, { once: true });
+      return originals.xhrSend.call(this, body);
+    };
+
+    if (originals.fetch) {
+      window.fetch = function passiveProbeFetch(input, init = {}) {
+        const req = typeof Request !== 'undefined' && input instanceof Request ? input : null;
+        const meta = {
+          kind: 'fetch',
+          method: String(init.method || req?.method || 'GET').toUpperCase(),
+          url: sanitizeUrl(req?.url || input || ''),
+          requestBody: safeBody(init.body),
+          startedAt: now()
+        };
+        const promise = originals.fetch.call(this, input, init);
+        promise.then(async (response) => {
+          if (state.network.length >= MAX_NETWORK) return;
+          meta.completedAt = now();
+          meta.status = Number(response.status || 0);
+          meta.responseUrl = sanitizeUrl(response.url || meta.url);
+          meta.responseBody = await captureFetchBody(meta.responseUrl, response);
+          state.network.push(meta);
+          refresh();
+        }).catch((error) => {
+          if (state.network.length >= MAX_NETWORK) return;
+          meta.completedAt = now();
+          meta.error = String(error?.message || error);
+          state.network.push(meta);
+          render();
+        });
+        return promise;
+      };
+    }
+  }
+
+  function refresh() {
+    if (!state.active) return;
+    collectFiles();
+    collectTables();
+    collectPanels();
+    state.page = {
+      at: now(),
+      href: sanitizeUrl(location.href),
+      title: document.title,
+      readyState: document.readyState,
+      files: state.files.length,
+      network: state.network.length,
+      tables: state.tables.length,
+      panels: state.panels.length,
+      decodedData: state.decodedData.length
+    };
+    render();
+  }
+
+  function download() {
+    collectFiles();
+    collectTables();
+    collectPanels();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `KCD-Passive-Data-Probe-v${VER}-${stamp}.json`;
+    const blob = new Blob([JSON.stringify(state, null, 2) + '\n'], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    return fileName;
+  }
+
+  function stop() {
+    if (!state.active) return { ok: true, alreadyStopped: true };
+    state.active = false;
+    state.stoppedAt = now();
+    try { observer?.disconnect(); } catch {}
+    try { clearInterval(timer); } catch {}
+    try { XMLHttpRequest.prototype.open = originals.xhrOpen; } catch {}
+    try { XMLHttpRequest.prototype.send = originals.xhrSend; } catch {}
+    try { if (originals.fetch) window.fetch = originals.fetch; } catch {}
+    render();
+    return { ok: true, stoppedAt: state.stoppedAt, dataReady: true };
+  }
+
+  function esc(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
+  }
+
+  function render() {
+    if (!box?.isConnected) return;
+    const status = box.querySelector('.status');
+    const files = box.querySelector('.files');
+    const stopButton = box.querySelector('.stop');
+
+    if (status) {
+      status.innerHTML = `Status: <b>${state.active ? 'PASSIEF ACTIEF' : 'GESTOPT'}</b><br>` +
+        `Bestanden: ${state.files.length} · Netwerk: ${state.network.length} · Gedecodeerde data: ${state.decodedData.length}<br>` +
+        `Tabellen: ${state.tables.length} · Panelen: ${state.panels.length}<br>` +
+        `DOM-mutaties: ${state.mutations.childList + state.mutations.attributes} · Fouten: ${state.errors.length}<br>` +
+        `<span style="opacity:.7">Klikfunctionaliteit: UIT</span>`;
+    }
+
+    if (files) {
+      files.innerHTML = state.files.slice(-150).reverse().map((file) =>
+        `<div style="padding:3px 0;border-bottom:1px solid #222">` +
+        `<span style="opacity:.6">[${esc(file.type)}]</span> ` +
+        `<span title="${esc(file.url)}">${esc(file.name)}</span></div>`
+      ).join('') || '<span style="opacity:.6">Nog geen resources gevonden</span>';
+    }
+
+    if (stopButton) {
+      stopButton.disabled = !state.active;
+      stopButton.style.opacity = state.active ? '1' : '.45';
+    }
+  }
+
+  function makeUi() {
+    document.getElementById(UI)?.remove();
+    box = document.createElement('div');
+    box.id = UI;
+    Object.assign(box.style, {
+      position: 'fixed', top: '12px', right: '12px', width: '430px', maxHeight: '82vh',
+      overflow: 'hidden', zIndex: '2147483647', background: 'rgba(14,14,17,.97)', color: '#fff',
+      border: '1px solid #555', borderRadius: '10px', boxShadow: '0 8px 24px #0008',
+      font: '12px/1.4 Consolas,monospace'
+    });
+
+    box.innerHTML = `<div class="head" style="padding:10px 12px;border-bottom:1px solid #444;cursor:move;font-weight:700">` +
+      `KCD Passive Data Probe v${VER}</div>` +
+      `<div style="padding:10px 12px"><div class="status" style="margin-bottom:8px"></div>` +
+      `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">` +
+      `<button class="refresh">VERVERS</button><button class="download">DOWNLOAD JSON</button><button class="stop">STOP</button></div>` +
+      `<b>Gevonden bestanden/resources</b>` +
+      `<div class="files" style="margin-top:5px;max-height:47vh;overflow:auto;border:1px solid #333;border-radius:6px;padding:6px;background:#09090b"></div></div>`;
+
+    document.documentElement.appendChild(box);
+
+    for (const button of box.querySelectorAll('button')) {
+      Object.assign(button.style, {
+        padding: '6px 8px', border: '1px solid #666', borderRadius: '5px',
+        background: '#222', color: '#fff', cursor: 'pointer', font: 'inherit'
+      });
+    }
+
+    box.querySelector('.refresh').onclick = refresh;
+    box.querySelector('.download').onclick = download;
+    box.querySelector('.stop').onclick = stop;
+
+    const head = box.querySelector('.head');
+    let drag = null;
+    head.addEventListener('pointerdown', (event) => {
+      const rect = box.getBoundingClientRect();
+      drag = { dx: event.clientX - rect.left, dy: event.clientY - rect.top };
+      head.setPointerCapture?.(event.pointerId);
+    });
+    head.addEventListener('pointermove', (event) => {
+      if (!drag) return;
+      box.style.left = `${Math.max(0, Math.min(innerWidth - box.offsetWidth, event.clientX - drag.dx))}px`;
+      box.style.top = `${Math.max(0, Math.min(innerHeight - 40, event.clientY - drag.dy))}px`;
+      box.style.right = 'auto';
+    });
+    head.addEventListener('pointerup', () => { drag = null; });
+
+    render();
+  }
+
+  installNetworkHooks();
+
+  observer = new MutationObserver((items) => {
+    let changed = false;
+    for (const mutation of items) {
+      if (isUiNode(mutation.target)) continue;
+      if (mutation.type === 'childList') state.mutations.childList += 1;
+      else if (mutation.type === 'attributes') state.mutations.attributes += 1;
+      changed = true;
+    }
+    if (changed) {
+      collectFiles();
+      render();
+    }
+  });
+
+  observer.observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    characterData: false
+  });
+
+  makeUi();
+  refresh();
+  timer = setInterval(refresh, 3000);
+
+  window[G] = Object.freeze({
+    name: state.name,
+    version: VER,
+    status: () => ({
+      active: state.active,
+      mode: state.mode,
+      files: state.files.length,
+      network: state.network.length,
+      decodedData: state.decodedData.length,
+      tables: state.tables.length,
+      panels: state.panels.length,
+      errors: state.errors.length
+    }),
+    data: () => state,
+    refresh,
+    download,
+    stop,
+    show: makeUi,
+    hide: () => document.getElementById(UI)?.remove()
+  });
+
+  console.log(`[KCD Passive Data Probe v${VER}] actief; klikfunctionaliteit is uitgeschakeld.`);
 })();
